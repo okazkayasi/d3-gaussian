@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+<!-- Load d3.js -->
+<head>
+    <script src="lib/d3v4.js"></script>
+    <script src="lib/jstat.js" type="text/javascript"></script>
+    <script src="lib/math.js" type="text/javascript"></script>
+    <title>Math Functions</title>
+</head>
+<!-- Create a div where the graph will take place -->
+<body>
+    <div id="gaussian-pVal">
+        <div id="my_dataviz" style="display: inline-block; float: left"></div>
+        <div id="buttons" style="display: inline-block; margin: .4rem .4rem;">
+            <h1>Blue Curve</h1>
+            <label style="display: block; margin-top: 3rem; margin-bottom: .5rem">Select mu</label>
+
+            <input id="mu" type="number" min="-1000" max="1000" value="25"
+                   step="1" onchange="reCalculate()">
+
+            <label style="display: block; margin-top: 3rem; margin-bottom: .5rem">Select sigma</label>
+
+            <input id="sigma" type="number" min="0.1" max="10" value="1.25"
+                   step="0.1" onchange="reCalculate()">
+
+            <label style="display: block; margin-top: 3rem; margin-bottom: .5rem">Select sample size</label>
+
+            <input id="samples" type="number" min="0" max="100" value="10"
+                   step="1" onchange="reCalculate()">
+        </div>
+        <div id="redbuttons" style="display: inline-block; margin: .4rem .4rem;">
+            <h1>Red Curve</h1>
+            <label style="display: block; margin-top: 3rem; margin-bottom: .5rem">Select mu</label>
+
+            <input id="mu-red" type="number" min="-1000" max="1000" value="30"
+                   step="1" onchange="reCalculate()">
+
+            <label style="display: block; margin-top: 3rem; margin-bottom: .5rem">Select sigma</label>
+
+            <input id="sigma-red" type="number" min="0.1" max="10" value="1"
+                   step="0.1" onchange="reCalculate()">
+
+            <label style="display: block; margin-top: 3rem; margin-bottom: .5rem">Select sample size</label>
+
+            <input id="samples-red" type="number" min="0" max="100" value="10"
+                   step="1" onchange="reCalculate()">
+        </div>
+        <div>
+            <h2 style="display: inline-block">p-value: </h2>
+            <p id="p-val" style="display: inline-block"></p>
+        </div>
+    </div>
+    <div id="fitting line" style="margin-top: 50px">
+        <div id="my_scatter" style="display: inline-block; float: left"></div>
+        <div id="buttons2" style="display: inline-block; margin: .4rem .4rem">
+            <h1>Regression Plotter</h1>
+            <form>
+                <label>
+                    <select id="mode" onchange="scatterPlotD3Caller()">
+                        <option value = "linear" selected>Linear Regression</option>
+                        <option value = "log">Logarithmic Regression</option>
+                        <option value = "poly">Polynomial Regression</option>
+                    </select>
+                </label>
+
+            </form>
+            <label style="display: block; margin-top: 3rem; margin-bottom: .5rem">Randomize</label>
+            <input id="randomize" type="number" min="0" max="100" value="10"
+                   step="1" onchange="scatterPlotD3Caller()">
+        </div>
+    </div>
+</body>
+
+
+
+<script>
+    function reCalculate() {
+        let mu = +(document.getElementById("mu").value);
+        let sigma = +(document.getElementById("sigma").value);
+        let mu_red = +(document.getElementById("mu-red").value);
+        let sigma_red = +(document.getElementById("sigma-red").value);
+        let sample_size = +(document.getElementById("samples").value);
+        let sample_size_red = +(document.getElementById("samples-red").value);
+
+
+        let x_step = 0.1;
+        let x_step_red = 0.1;
+        if(sigma < 0.3){
+            x_step = 0.001
+        }
+        else if(sigma < 0.5){
+            x_step = 0.01
+        }
+        else if(sigma > 5){
+            x_step = 1
+        }
+
+        if(sigma_red < 0.3){
+            x_step_red = 0.001
+        }
+        else if(sigma_red < 0.5){
+            x_step_red = 0.01
+        }
+        else if(sigma_red > 5){
+            x_step_red = 1
+        }
+
+        plot(mu, sigma, x_step, mu_red, sigma_red, x_step_red, sample_size, sample_size_red);
+    }
+
+    function range(start, stop, step) {
+        let a = [start], b = start;
+        while (b < stop) {
+            a.push(b += step || 1);
+        }
+        return a;
+    }
+
+    function exportToCsv(filename, rows) {
+        const processRow = function (row) {
+            let finalVal = '';
+            for (let j = 0; j < row.length; j++) {
+                let innerValue = row[j] === null ? '' : row[j].toString();
+                if (row[j] instanceof Date) {
+                    innerValue = row[j].toLocaleString();
+                }
+                let result = innerValue.replace(/"/g, '""');
+                if (result.search(/([",\n])/g) >= 0)
+                    result = '"' + result + '"';
+                if (j > 0)
+                    finalVal += ',';
+                finalVal += result;
+            }
+            return finalVal + '\n';
+        };
+
+        let csvFile = '';
+        for (let i = 0; i < rows.length; i++) {
+            csvFile += processRow(rows[i]);
+        }
+
+        let blob = new Blob([csvFile], { type: 'text/csv;charset=utf-8;' });
+        if (navigator.msSaveBlob) { // IE 10+
+            navigator.msSaveBlob(blob, filename);
+        } else {
+            let link = document.createElement("a");
+            if (link.download !== undefined) { // feature detection
+                // Browsers that support HTML5 download attribute
+                let url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+    }
+
+    function gaussian_plotter(mu, sigma, step, n=0) {
+        let x = Array.from(range(mu - 4 * sigma, mu + 4 * sigma + step, step));
+        let gaussian = x.map(function (value) {
+            return (1 / Math.sqrt(2 * Math.PI * sigma ** 2)) * Math.exp(-1 / 2 * Math.pow(((value - mu) / sigma), 2));
+        });
+        let samples = [];
+        for (let i = 0; i < n; i++) {
+            samples.push(jStat.normal.sample(mu, sigma));
+        }
+        return {"x": x, "y": gaussian, "samples": samples};
+    }
+
+    function t_test(samples_a, samples_b) {
+        // console.log(samples_a, samples_b);
+        let n_a = samples_a.length;
+        let n_b = samples_b.length;
+        let df_a = n_a -1;
+        let df_b = n_b -1;
+        let k = n_a + n_b - 2;
+        let mean_a = math.mean(samples_a);
+        let mean_b = math.mean(samples_b);
+        let var_a = math.variance(samples_a);
+        let var_b = math.variance(samples_b);
+        // console.log('vars', var_a, var_b);
+        let spp = (df_a/k)*var_a + (df_b/k)*var_b;
+        let spp1 = spp/n_a;
+        let spp2 = spp/n_b;
+        // console.log(spp);
+        spp = math.sqrt(spp1 + spp2);
+
+        let diff = mean_a - mean_b;
+        // console.log('diff', diff);
+        let t = diff / spp;
+
+        // console.log(t);
+        let p_value = jStat.ttest(t, k+1, 2);
+        document.getElementById('p-val').innerHTML = p_value;
+        return p_value;
+    }
+
+    function least_square_regression(x_vals, y_vals, mode="log"){
+
+        let x_mat;
+        if(mode === "log"){
+            x_mat = x_vals.map(x => [1, Math.log(x)]);
+        }
+        else if(mode === "linear"){
+            x_mat = x_vals.map(x=> [1, x]);
+        }
+        else if(mode === "poly"){
+            x_mat = x_vals.map(x => [1, x, x**2]);
+        }
+        let x_mat_t = math.transpose(x_mat);
+        let y_mat = y_vals.map(y => [y]);
+        let xT_x = math.multiply(x_mat_t, x_mat);
+        let inv = math.inv(xT_x);
+        let xT_y = math.multiply(x_mat_t, y_mat);
+        let w = math.multiply(inv, xT_y);
+        w = w.map(w => w[0]);
+        w = w.reverse();
+        return w;
+    }
+
+    function plot(mu=25, sigma=1.25, step=0.1, red_mu=30, red_sigma=1, red_step=0.1, sample_size = 10, sample_size_red =10){
+        d3.select('body').select('#my_dataviz').select('svg').remove();
+
+        let data = (gaussian_plotter(mu, sigma, step, sample_size));
+        let data_red = gaussian_plotter(red_mu, red_sigma, red_step, sample_size_red);
+        // set the dimensions and margins of the graph
+        // exportToCsv('sample'+mu+'-'+red_mu+'.csv', [[data.samples],[data_red.samples]]);
+
+        t_test(data.samples, data_red.samples);
+        // let q = t_test([1,2,3], [2,3,4]);
+
+
+        let margin = {top: 10, right: 30, bottom: 30, left: 60},
+            width = 460 - margin.left - margin.right,
+            height = 400 - margin.top - margin.bottom;
+
+        // append the svg object to the body of the page
+        let svg = d3.select("#my_dataviz")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform",
+                "translate(" + margin.left + "," + margin.top + ")");
+
+        //Read the data
+        let x = data.x;
+        let y = data.y;
+
+        let x_red = data_red.x;
+        let y_red = data_red.y;
+
+        // Add X axis --> it is a date format
+
+        let xStart = 10;
+        let xEnd = 40;
+
+        if(mu < 15){
+            xStart = mu - 5;
+            xEnd = xStart + 30;
+        }
+        else if(mu > 35){
+            xEnd = mu + 5;
+            xStart = xEnd - 30;
+        }
+
+        let xScale = d3.scaleLinear()
+            .domain([xStart, xEnd])
+            .range([ 0, width ]);
+        svg.append("g")
+            .attr("transform", "translate(0," + height + ")")
+            .call(d3.axisBottom(xScale));
+
+        // Add Y axis
+        let yScale = d3.scaleLinear()
+            .domain([0, Math.max(1, d3.max(y))])
+            .range([ height, 0 ]);
+        svg.append("g")
+            .call(d3.axisLeft(yScale));
+
+
+        let data_list = data.x.map((e,i) =>{
+            return [xScale(e), yScale(data.y[i])]
+        });
+        data_list = data_list.filter(d=>{
+            return d[0] >= xScale(xStart) && d[0] <= xScale(xEnd);
+        });
+
+        let data_list_red = data_red.x.map((e,i)=>{
+            return [xScale(e), yScale(data_red.y[i])];
+        });
+        data_list_red = data_list_red.filter(d=>{
+            return d[0] >= xScale(xStart) && d[0] <= xScale(xEnd);
+        });
+
+        let lineGenerator = d3.line();
+        let pathData = lineGenerator(data_list);
+
+        let pathDataRed = lineGenerator(data_list_red);
+
+        data = data.x.map((e,i)=>{
+            return{
+                x: e,
+                y: data.y[i]
+            };
+        });
+        data = data.filter(function (d) {
+            if(d.x >= xStart && d.x <= xEnd){
+                return d;
+            }
+        });
+
+        // Add the line
+        svg.selectAll(".line")
+            .data(data)
+            .enter()
+            .append("path")
+            .attr("fill", "none")
+            .attr("stroke", "steelblue")
+            .attr("stroke-width", 1.5)
+            .attr("d", pathData);
+
+
+        svg.selectAll(".line")
+            .data(data)
+            .enter()
+            .append("path")
+            .attr("fill", "none")
+            .attr("stroke", "red")
+            .attr("stroke-width", 1.5)
+            .attr("d", pathDataRed);
+    }
+    plot();
+
+
+    function data_producer(mode="linear", rand = 10,
+                           sample_size = 100, range=[2, 22]){
+
+        console.log(rand);
+        let vals;
+        if(mode === "log") vals = [50, 20, 5];
+        if(mode === "linear") vals = [100, 10, 0];
+        if(mode === "poly") vals = [200, 10, 4];
+        if(mode === "sine") vals = [100, 4, 0]; // [A, w, p]
+        let x_vals = math.random([sample_size], range[0], range[1]);
+        let y_vals;
+        if(mode === "linear"){
+            y_vals = x_vals.map(x => x * vals[1] + vals[0]);
+            mode = "poly";
+        }
+        if(mode === "log"){
+            y_vals = x_vals.map(x => vals[1] * Math.log(x) + vals[0]);
+        }
+        if(mode === "poly"){
+            y_vals = x_vals.map(x => (x**2)*vals[2] + x*vals[1] + vals[0]);
+        }
+        if(mode === "sine"){
+            y_vals = x_vals.map(x => vals[0] * math.sin(vals[1]*x + vals[2]));
+        }
+        let r = (d3.max(y_vals) - vals[0])*rand/100;
+        let randomize = math.random([sample_size], -r, r);
+        let y_valsR = y_vals.map((y, i) => Math.max(y+randomize[i], 0));
+        return [x_vals, y_valsR];
+    }
+    
+    function scatterPlotD3(mode = 'poly', rand=10) {
+        d3.select('body').select('#my_scatter').select('svg').remove();
+        let margin = {top: 10, right: 30, bottom: 30, left: 60},
+            width = 460 - margin.left - margin.right,
+            height = 400 - margin.top - margin.bottom;
+        let svg = d3.select("#my_scatter")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform",
+                "translate(" + margin.left + "," + margin.top + ")");
+
+        // get the data
+        let [x_vals, y_vals] = data_producer(mode, rand);
+        let data = x_vals.map(function(d,i){
+            return {x:d, y:y_vals[i]};
+        });
+        // x-axis
+        let xScale = d3.scaleLinear()
+            .domain([0, d3.max(x_vals)])
+            .range([0, width]);
+        svg.append('g')
+            .attr('transform', 'translate(0, '+ height + ')')
+            .call(d3.axisBottom(xScale));
+        // y-axis
+        let yScale = d3.scaleLinear()
+            .domain([Math.min(0,d3.min(y_vals)), d3.max(y_vals)])
+            .range([height, 0]);
+        svg.append('g')
+            .call(d3.axisLeft(yScale));
+
+        // dots
+        svg.append('g')
+            .selectAll('dot')
+            .data(data)
+            .enter()
+            .append('circle')
+                .attr('cx', d => xScale(d.x))
+                .attr('cy', d => yScale(d.y))
+                .attr('r', 2.5)
+                .style('fill', '#69b3a3');
+
+
+        // fit the line
+        let result = least_square_regression(x_vals, y_vals, mode);
+        let data_list;
+        let x_es = range(0.1, d3.max(x_vals), 0.1);
+        if(mode === "log"){
+            data_list = x_es.map((e) =>{
+                return [xScale(e), yScale(Math.log(e)*result[0] + result[1])];
+            });
+        } else if (mode === "linear"){
+            data_list = x_es.map((e) =>{
+                return [xScale(e), yScale(e*result[0] + result[1])];
+            });
+        } else if (mode === "poly"){
+            data_list = x_es.map((e) =>{
+                return [xScale(e), yScale((e**2)*result[0] + e*result[1] + result[2])];
+            });
+        }
+        // add the line
+        let lineGenerator = d3.line();
+        let pathData = lineGenerator(data_list);
+        svg.selectAll(".line")
+            .data(x_es)
+            .enter()
+            .append("path")
+            .attr("fill", "none")
+            .attr("stroke", "red")
+            .attr("stroke-width", 1.5)
+            .attr("d", pathData);
+
+        // add the residuals
+        let resids = draw_residuals(data, result, mode);
+        let selection = svg.selectAll('.resline').data(resids);
+
+        let lineFunction = d3.line()
+            .x(function(d) { return d.x; })
+            .y(function(d) { return d.y; });
+
+        selection.enter().append('path').transition()
+            .attr("d", function(d){
+                return lineFunction([{"x": xScale(d.x0), "y": yScale(d.y0)}, {"x": xScale(d.x1), "y": yScale(d.y1)}]);
+            })
+            .attr("stroke-width", 1)
+            .attr("stroke", "blue")
+            .attr('class', 'resline');
+
+    }
+
+    function draw_residuals(data, coeffs, mode) {
+
+        let resids;
+        if(mode === "linear"){
+            resids = data.map(function (d) {
+                return {"x0": d.x, "y0": d.y, "x1": d.x, "y1": coeffs[0] * d.x + coeffs[1]}
+            });
+        }else if(mode === "log"){
+            resids = data.map(function (d) {
+                return {"x0": d.x, "y0": d.y, "x1": d.x, "y1": coeffs[0] * Math.log(d.x) + coeffs[1]}
+            });
+        }else if(mode === "poly"){
+            resids = data.map(function (d) {
+                return {"x0": d.x, "y0": d.y, "x1": d.x, "y1": coeffs[0] * (d.x**2) + coeffs[1]*d.x + coeffs[2]}
+            });
+        }
+
+        return resids;
+    }
+
+    function scatterPlotD3Caller(){
+        let mode = document.getElementById('mode').value;
+        console.log(mode);
+        let randomize = +document.getElementById('randomize').value;
+        console.log(randomize);
+        scatterPlotD3(mode, randomize);
+    }
+
+    scatterPlotD3('linear');
+
+
+</script>
